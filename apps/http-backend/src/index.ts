@@ -10,45 +10,91 @@ import {
 } from '@repo/common/types';
 import jwt from 'jsonwebtoken';
 import { middleware } from './middleware';
+import { prismaClient } from '@repo/db/client';
 
 const app = express();
+app.use(express.json());
 
-app.post('/signup', (req, res) => {
-  const data = CreateUserSchema.safeParse(req.body);
-  if (!data.success) {
+app.post('/signup', async (req, res) => {
+  const zodResponse = CreateUserSchema.safeParse(req.body);
+  if (!zodResponse.success) {
     return res.json({
       message: 'Incorrect inputs',
     });
   }
 
-  res.json({ userId: 123 });
+  const { username, password, name } = zodResponse.data;
+
+  try {
+    const user = await prismaClient.user.create({
+      data: {
+        email: username,
+        password,
+        name,
+      },
+    });
+    res.json({ userId: user.id });
+  } catch (error) {
+    res.json(error);
+  }
 });
 
-app.post('/signin', (req, res) => {
-  const data = SigninUserSchema.safeParse(req.body);
-  if (!data.success) {
+app.post('/signin', async (req, res) => {
+  const zodResponse = SigninUserSchema.safeParse(req.body);
+  if (!zodResponse.success) {
     return res.json({
       message: 'Incorrect inputs',
     });
   }
+  try {
+    const user = await prismaClient.user.findUnique({
+      where: {
+        email: zodResponse.data.username,
+        password: zodResponse.data.password,
+      },
+    });
 
-  const userId = '123';
-  const token = jwt.sign({ userId }, JWT_SECRET as string);
+    if (!user) {
+      return res.json({ message: 'Not authorized' });
+    }
 
-  res.json({ token });
+    const userId = user?.id;
+    const token = jwt.sign({ userId }, JWT_SECRET as string);
+
+    res.json({ token });
+  } catch (error) {
+    res.json(error);
+  }
 });
 
-app.post('/room', middleware, (req, res) => {
-  const data = CreateRoomSchema.safeParse(req.body);
-  if (!data.success) {
+app.post('/room', middleware, async (req, res) => {
+  const zodResponse = CreateRoomSchema.safeParse(req.body);
+  if (!zodResponse.success) {
     return res.json({
       message: 'Incorrect inputs',
     });
   }
 
-  res.json({
-    roomId: 123,
-  });
+  const userId = req.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  try {
+    const room = await prismaClient.room.create({
+      data: {
+        slug: zodResponse.data.name,
+        adminId: userId,
+      },
+    });
+
+    res.json({
+      roomId: room.id,
+    });
+  } catch (error) {
+    res.json(error);
+  }
 });
 
 app.listen(3001, () => {
